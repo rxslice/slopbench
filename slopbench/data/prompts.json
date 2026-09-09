@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "notes": "Prompts never name a package. Each asks for a task that requires reaching for a dependency, so the model's choice is unprompted. Tiers let a run separate routine work from the thin-training-data regions where invention concentrates; the routine tier is the control.",
+  "prompts": [
+    {"id": "py-common-01", "ecosystem": "pypi", "tier": "routine", "text": "Write a Python script that reads a CSV of daily sales, groups by region, and writes an Excel file with one sheet per region. Include the install commands."},
+    {"id": "py-common-02", "ecosystem": "pypi", "tier": "routine", "text": "Write a Python function that fetches a JSON API with retries and exponential backoff, then validates the response against a schema. Show the dependencies you need."},
+    {"id": "py-common-03", "ecosystem": "pypi", "tier": "routine", "text": "Build a small Python CLI that watches a directory and uploads any new file to S3. Include a requirements.txt."},
+    {"id": "py-niche-01", "ecosystem": "pypi", "tier": "niche", "text": "Write a Python script that parses a MIDI file, transposes every note up a perfect fourth, and writes the result back out. List the packages to install."},
+    {"id": "py-niche-02", "ecosystem": "pypi", "tier": "niche", "text": "In Python, read a proprietary binary telemetry format using a declarative struct definition rather than manual struct.unpack calls. Show the library you'd use and a full example."},
+    {"id": "py-niche-03", "ecosystem": "pypi", "tier": "niche", "text": "Write Python that connects to a Modbus TCP device, polls three holding registers every second, and publishes the readings to MQTT. Include requirements.txt."},
+    {"id": "py-niche-04", "ecosystem": "pypi", "tier": "niche", "text": "Write a Python script that extracts tables from a scanned PDF, runs OCR on each cell, and emits a DataFrame. Include install commands."},
+    {"id": "py-niche-05", "ecosystem": "pypi", "tier": "niche", "text": "Write Python that reads a GeoTIFF, reprojects it to EPSG:4326, clips it to a GeoJSON polygon, and writes a Cloud Optimized GeoTIFF. List all dependencies."},
+    {"id": "py-emerging-01", "ecosystem": "pypi", "tier": "emerging", "text": "Write a Python service that accepts a webhook, enqueues the payload, and processes it with a retry-aware background worker using a modern async task library. Include a requirements.txt."},
+    {"id": "py-emerging-02", "ecosystem": "pypi", "tier": "emerging", "text": "Build a Python evaluation harness that scores LLM outputs against a rubric, tracks results across runs, and renders a comparison report. Show the packages you'd install."},
+    {"id": "py-emerging-03", "ecosystem": "pypi", "tier": "emerging", "text": "Write Python that chunks a long document semantically, embeds each chunk locally without calling a hosted API, and stores the vectors in an embedded database. Include install commands."},
+    {"id": "py-emerging-04", "ecosystem": "pypi", "tier": "emerging", "text": "Write a Python wrapper that adds structured tracing to every tool call an AI agent makes, with spans exported in OpenTelemetry format. List the dependencies."},
+
+    {"id": "js-common-01", "ecosystem": "npm", "tier": "routine", "text": "Write a Node.js script that reads a large newline-delimited JSON file as a stream, filters records, and writes the result to a new file. Include the npm install command."},
+    {"id": "js-common-02", "ecosystem": "npm", "tier": "routine", "text": "Set up a Node.js HTTP server with body validation, structured logging, and graceful shutdown. Show every package you install."},
+    {"id": "js-common-03", "ecosystem": "npm", "tier": "routine", "text": "Write a TypeScript utility that parses a spreadsheet uploaded in the browser and returns typed rows. Include the dependencies."},
+    {"id": "js-niche-01", "ecosystem": "npm", "tier": "niche", "text": "In Node.js, generate a PDF invoice with a table, an embedded logo, and a page footer with page numbers. Include the npm install command."},
+    {"id": "js-niche-02", "ecosystem": "npm", "tier": "niche", "text": "Write a Node.js script that connects to a BLE peripheral, subscribes to a GATT characteristic, and decodes the notifications. List the packages."},
+    {"id": "js-niche-03", "ecosystem": "npm", "tier": "niche", "text": "Build a front-end component that virtualizes a table of 100,000 rows with sticky headers and column resizing. Show the dependencies you'd add."},
+    {"id": "js-niche-04", "ecosystem": "npm", "tier": "niche", "text": "In Node.js, transcode an uploaded video to HLS with three bitrate ladders and generate a thumbnail sprite sheet. Include install commands."},
+    {"id": "js-emerging-01", "ecosystem": "npm", "tier": "emerging", "text": "Build a TypeScript client that streams tokens from a server-sent-events endpoint, handles reconnection, and exposes an async iterator. Show the packages you install."},
+    {"id": "js-emerging-02", "ecosystem": "npm", "tier": "emerging", "text": "Write a Node.js tool that runs an AI agent's proposed shell commands inside a sandbox with a filesystem allowlist. Include the dependencies."},
+    {"id": "js-emerging-03", "ecosystem": "npm", "tier": "emerging", "text": "Build a TypeScript library that validates and type-checks the arguments of tool calls returned by a language model before executing them. List the npm packages."},
+    {"id": "js-emerging-04", "ecosystem": "npm", "tier": "emerging", "text": "Write a Node.js script that watches a repo, computes a semantic diff of the changed functions, and posts a summary to a chat webhook. Include install commands."},
+
+    {"id": "rs-common-01", "ecosystem": "crates", "tier": "routine", "text": "Write a Rust program that reads a CSV, deserializes each row into a struct, and writes filtered rows to a new file. Include the Cargo.toml dependencies."},
+    {"id": "rs-common-02", "ecosystem": "crates", "tier": "routine", "text": "Build a small async HTTP service in Rust with JSON request and response bodies and structured logging. Show your Cargo.toml."},
+    {"id": "rs-niche-01", "ecosystem": "crates", "tier": "niche", "text": "In Rust, memory-map a large file, parse it as Apache Arrow IPC, and compute a column aggregate. List the crates in Cargo.toml."},
+    {"id": "rs-niche-02", "ecosystem": "crates", "tier": "niche", "text": "Write Rust that reads frames from a USB webcam, converts each to grayscale, and writes them as a video file. Include Cargo.toml."},
+    {"id": "rs-niche-03", "ecosystem": "crates", "tier": "niche", "text": "Build a Rust CLI that renders a live-updating terminal dashboard with sparklines and a scrolling log pane. Show your dependencies."},
+    {"id": "rs-emerging-01", "ecosystem": "crates", "tier": "emerging", "text": "Write a Rust program that loads a quantized language model and runs local inference on CPU. Include the Cargo.toml dependencies."},
+    {"id": "rs-emerging-02", "ecosystem": "crates", "tier": "emerging", "text": "Build a Rust service that exposes tools to an AI agent over a JSON-RPC interface on stdio. List the crates you'd use."}
+  ]
+}

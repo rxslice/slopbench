@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slopbench"
+version = "0.1.0"
+description = "Measure how often a model invents software dependencies, and how often it invents the same one twice."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+authors = [{name = "Blvkware"}]
+keywords = ["llm", "hallucination", "supply-chain", "slopsquatting", "benchmark", "security"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+  "License :: OSI Approved :: Apache Software License",
+]
+dependencies = []
+
+[project.optional-dependencies]
+pkgguard = ["pkgguard"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+slopbench = "slopbench.cli:main"
+
+[project.urls]
+Homepage = "https://blvkware.dev"
+
+[tool.setuptools.packages.find]
+include = ["slopbench*"]
+
+[tool.setuptools.package-data]
+slopbench = ["data/*.json"]
