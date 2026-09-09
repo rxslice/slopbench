@@ -3,13 +3,43 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Optional, Sequence
 
 from . import __version__
-from .bench import load_prompts, run, to_pkgguard_corpus
+from .bench import (
+    CorpusFormatError,
+    Result,
+    count_corpus_names,
+    load_prompts,
+    merge_pkgguard_corpus,
+    run,
+    to_pkgguard_corpus,
+)
 from .providers import ProviderError, build
 from .report import render_html, render_markdown
+
+
+def _write_corpus(path: str, result: Result) -> int:
+    """Write, or extend, the pkgguard corpus at `path`. Returns names added.
+
+    Merging when the file already exists is the default rather than an option,
+    because the corpus is the part that accumulates across runs: a scheduled run
+    that happened to see nothing must not erase what an earlier one found.
+    """
+    incoming = to_pkgguard_corpus(result)
+    existing = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            existing = json.load(fh)
+
+    before = count_corpus_names(existing) if existing is not None else 0
+    merged = merge_pkgguard_corpus(existing, incoming) if existing is not None else incoming
+
+    with open(path, "w", encoding="utf-8") as fh:
+        print(json.dumps(merged, indent=2), file=fh)
+    return count_corpus_names(merged) - before
 
 
 def _filter(prompts, ecosystem: Optional[str], tier: Optional[str], limit: Optional[int]):
@@ -42,7 +72,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--report", help="Write an HTML report here.")
     r.add_argument("--markdown", help="Write a Markdown report here.")
     r.add_argument("--json", dest="json_path", help="Write the raw result here.")
-    r.add_argument("--corpus", help="Write recurring findings in pkgguard corpus format.")
+    r.add_argument("--corpus",
+                   help="Write recurring findings in pkgguard's known-hallucination "
+                        "format. Merges into the file if it already exists.")
     r.add_argument("--subject", default="", help="Who this report is about, for the header.")
     r.add_argument("--no-pkgguard", action="store_true",
                    help="Use public registry APIs directly even if pkgguard is installed.")
@@ -84,6 +116,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.quiet:
         print(" " * 60, file=sys.stderr, end="\r")
 
+    if result.total_samples == 0:
+        # Zero completions is not a clean result. Falling through would write a
+        # report headlined "0 recurring invented names" and exit 0 - a clean
+        # bill of health manufactured out of a missing API key.
+        print("No completions were obtained; nothing was measured. "
+              "No report written.", file=sys.stderr)
+        for error in result.errors[:5]:
+            print(f"error: {error}", file=sys.stderr)
+        return 2
+
     if args.report:
         with open(args.report, "w", encoding="utf-8") as fh:
             fh.write(render_html(result, args.subject))
@@ -94,8 +136,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         with open(args.json_path, "w", encoding="utf-8") as fh:
             json.dump(result.to_dict(), fh, indent=2)
     if args.corpus:
-        with open(args.corpus, "w", encoding="utf-8") as fh:
-            json.dump(to_pkgguard_corpus(result), fh, indent=2)
+        try:
+            added = _write_corpus(args.corpus, result)
+        except (CorpusFormatError, ValueError) as error:
+            print(f"corpus: refusing to write {args.corpus}: {error}", file=sys.stderr)
+            return 2
+        print(f"corpus: {added} new name(s) written to {args.corpus}")
 
     print(f"{result.model}: {result.targetable_distinct} recurring invented "
           f"name(s); {result.invented_distinct} invented of "

@@ -23,6 +23,15 @@ Three things are dropped that a naive regex would keep:
 3. Modules the response defines itself. If a model writes `utils.py` and then
    writes `from utils import helper`, that is coherent code, not an invented
    dependency.
+
+4. Prose that happens to follow an install command. Install commands are read
+   only from fenced blocks, inline code spans, and lines that begin with a
+   package manager, and the package list stops at the first token that could
+   not be a name on that registry. Reading them out of running text turned
+   "run pip install pandas to load the data" into four PyPI packages, three of
+   which were English words that recur in every sample and would have scored as
+   targetable. The cost is that a package named only in prose is missed; that
+   is the right direction to be wrong in.
 """
 from __future__ import annotations
 
@@ -100,6 +109,56 @@ _INSTALL = [
     (re.compile(r"\bcargo\s+add\s+([^\n&|;]+)", re.I), "crates"),
 ]
 
+# Install commands are read only off the *command surface* of a response:
+# fenced blocks, inline code spans, and lines that begin with a package manager.
+# Scanning the whole response was the largest single source of invented
+# findings. "To get started, run pip install pandas to load the data." yielded
+# `to`, `load`, `the` and `data.` as PyPI packages — every one of them 404s,
+# every one recurs across samples because it is English, and every one would
+# have been reported as a targetable hallucination in someone else's product.
+_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_COMMAND_LINE = re.compile(
+    r"^[ \t]*(?:[$>#][ \t]+)?(?:sudo[ \t]+)?(?:python\d?[ \t]+-m[ \t]+)?"
+    r"(?:npm|yarn|pnpm|bun|pip3?|uv|poetry|cargo)\b.*$",
+    re.M | re.I,
+)
+
+# Flags whose argument is a path, a URL, or a feature list, never a package.
+# `pip install -r requirements.txt` reporting `requirements.txt` as an invented
+# PyPI package is the canonical version of this mistake.
+_FLAGS_TAKING_A_VALUE = {
+    # pip / uv / poetry
+    "-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
+    "--extra-index-url", "-f", "--find-links", "-t", "--target", "--prefix",
+    "--root", "--src", "--log", "--cache-dir", "--proxy", "--cert",
+    "--client-cert", "--python", "--platform", "--abi", "--implementation",
+    "-e", "--editable",
+    # cargo
+    "--registry", "--features", "--manifest-path", "--path", "--git",
+    "--branch", "--tag", "--rev", "--package", "-p", "--target-dir",
+    # npm / yarn / pnpm / bun
+    "-w", "--filter", "--workspace",
+}
+
+# Backstop behind the flag table: nobody publishes `requirements.txt`.
+_FILE_SUFFIXES = (
+    ".txt", ".toml", ".lock", ".cfg", ".ini", ".in", ".yml", ".yaml", ".json",
+    ".py", ".whl", ".zip", ".md", ".tar.gz",
+)
+
+# A token that could not be a package name on the registry it is claimed for is
+# a parsing mistake, not a finding. Requiring both ends to be alphanumeric is
+# what rejects prose trailing off the end of a command: `axios.`, `data.`.
+_NAME_GRAMMAR = {
+    "npm": re.compile(
+        r"^(?:@[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/)?"
+        r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    ),
+    "pypi": re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"),
+    "crates": re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$"),
+}
+MAX_NAME_LENGTH = 214  # npm's limit, comfortably above the other two
+
 _PY_SPEC = re.compile(r"[<>=!~\[;].*$")
 _VERSION_ONLY = re.compile(r"^[\d.]+$")
 
@@ -172,6 +231,57 @@ def _specifier_to_package(spec: str) -> Optional[str]:
     return root
 
 
+def _command_surface(text: str, blocks: List[tuple]) -> str:
+    """The parts of a response where a shell command can legitimately appear."""
+    parts = [body for _info, body in blocks]
+    parts.extend(_INLINE_CODE.findall(text))
+    parts.extend(_COMMAND_LINE.findall(text))
+    return "\n".join(parts)
+
+
+def _plausible(name: Optional[str], ecosystem: str) -> bool:
+    if not name or len(name) > MAX_NAME_LENGTH:
+        return False
+    if name.lower().endswith(_FILE_SUFFIXES):
+        return False
+    grammar = _NAME_GRAMMAR.get(ecosystem)
+    return bool(grammar and grammar.match(name))
+
+
+def _packages_from_install(argv: str, ecosystem: str) -> List[str]:
+    """Read the package list off one install command.
+
+    Scanning stops at the first token that is neither a flag nor a possible
+    package name. A shell command's package list is contiguous, so a token that
+    cannot be a package marks where the command ended and prose began. The rule
+    costs nothing on a well-formed command, and it is what keeps a sentence
+    from being reported as somebody's invented dependency.
+    """
+    names: List[str] = []
+    tokens = argv.split()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index].strip().strip("\"'`,")
+        index += 1
+        if not token:
+            continue
+        if token.startswith("-"):
+            if token in _FLAGS_TAKING_A_VALUE:
+                index += 1  # its argument is a path, a URL or a feature list
+            continue
+        cleaned = (
+            _specifier_to_package(token) if ecosystem == "npm" else _clean_py(token)
+        )
+        if cleaned is None:
+            # Dropped as a builtin, a relative path or a URL. All of those are
+            # legitimate parts of an install command, so keep reading.
+            continue
+        if not _plausible(cleaned, ecosystem):
+            break
+        names.append(cleaned)
+    return names
+
+
 def extract(text: str, ecosystem: Optional[str] = None) -> List[Suggestion]:
     """Extract package suggestions from a model response.
 
@@ -188,17 +298,14 @@ def extract(text: str, ecosystem: Optional[str] = None) -> List[Suggestion]:
         s = Suggestion(name=name, ecosystem=eco, source=source)
         found.setdefault(s.key(), s)
 
-    for pattern, eco in _INSTALL:
-        for match in pattern.finditer(text):
-            for token in match.group(1).split():
-                if eco == "npm":
-                    add(_specifier_to_package(token), eco, "install")
-                else:
-                    cleaned = _clean_py(token)
-                    if cleaned:
-                        add(cleaned, eco, "install")
-
     blocks = _code_blocks(text)
+    surface = _command_surface(text, blocks)
+
+    for pattern, eco in _INSTALL:
+        for match in pattern.finditer(surface):
+            for name in _packages_from_install(match.group(1), eco):
+                add(name, eco, "install")
+
     code = "\n".join(body for _, body in blocks) if blocks else text
     local = _locally_defined(text)
 

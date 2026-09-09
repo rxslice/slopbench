@@ -1,0 +1,9 @@
+# Normalize line endings so the repo is consistent across Windows/Linux/macOS.
+* text=auto eol=lf
+
+# Generated data corpora - keep them out of language stats.
+slopbench/data/*.json linguist-generated=true
+
+*.png binary
+*.jpg binary
+*.zip binary

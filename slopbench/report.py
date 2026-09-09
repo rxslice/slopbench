@@ -184,6 +184,10 @@ def render_html(result: Result, subject: str = "") -> str:
     ]
     if result.unverifiable_distinct:
         conditions.append(("Names registry could not confirm", result.unverifiable_distinct))
+    if result.errors:
+        # A run that lost samples measured less than it looks like it did, and
+        # the reader is entitled to that before the number rather than after.
+        conditions.append(("Samples that failed", len(result.errors)))
 
     tier_rows = "\n".join(
         f'<tr><td>{_e(tier)}</td><td class="num">{c["occurrences"]}</td>'
@@ -316,6 +320,8 @@ def render_markdown(result: Result, subject: str = "") -> str:
             f"- Excluded as unverifiable: {result.unverifiable_distinct} "
             f"(registry unreachable; not counted as clean)"
         )
+    if result.errors:
+        lines.append(f"- Samples that failed and were not measured: {len(result.errors)}")
     lines += ["", "## Findings", "",
               "| Package | Registry | Recurrence | Prompts | Status |",
               "|---|---|---|---|---|"]

@@ -10,7 +10,14 @@ import re
 
 import pytest
 
-from slopbench.bench import Result, run, to_pkgguard_corpus
+from slopbench.bench import (
+    CorpusFormatError,
+    Result,
+    count_corpus_names,
+    merge_pkgguard_corpus,
+    run,
+    to_pkgguard_corpus,
+)
 from slopbench.extract import extract
 from slopbench.providers import Completion, Provider
 from slopbench.report import render_html, render_markdown
@@ -149,6 +156,46 @@ def test_flags_and_urls_are_not_packages():
     assert names(text, "pypi") == {"requests"}
 
 
+def test_prose_around_an_install_command_is_not_a_dependency():
+    # The worst failure this tool can have: `to`, `load` and `the` all 404, all
+    # recur in every sample because they are English, and all would be reported
+    # as targetable hallucinations in somebody else's product.
+    text = "To get started, run pip install pandas to load the data."
+    assert names(text) & {"to", "load", "the", "data."} == set()
+
+
+def test_requirements_file_is_not_a_package():
+    assert names("```bash\npip install -r requirements.txt\n```") == set()
+
+
+def test_constraint_file_does_not_hide_the_package_after_it():
+    assert names("```bash\npip install -c constraints.txt django\n```") == {"django"}
+
+
+def test_cargo_feature_is_not_a_crate():
+    assert names("```bash\ncargo add serde --features derive\n```") == {"serde"}
+
+
+def test_trailing_punctuation_is_not_a_package():
+    assert names("You will need to run npm install axios.") == set()
+
+
+def test_install_in_an_inline_code_span_is_still_read():
+    assert names("Install it with `pip install pandas` first.") == {"pandas"}
+
+
+def test_install_on_its_own_line_is_still_read():
+    assert names("Run this:\n\nnpm install express cors\n\nThen start it.") == {
+        "express", "cors"
+    }
+
+
+def test_flags_do_not_stop_the_package_list():
+    assert names("```bash\nnpm install --save-dev jest @types/node\n```") == {
+        "jest", "@types/node"
+    }
+
+
 def test_submodule_import_reports_root_package():
     text = "```python\nimport matplotlib.pyplot as plt\nfrom scipy.stats import norm\n```"
     assert names(text, "pypi") == {"matplotlib", "scipy"}
@@ -278,8 +325,164 @@ def test_corpus_export_excludes_one_off_inventions(monkeypatch, tmp_path):
     })
     result = run(provider, _prompts(), samples=3, use_pkgguard=False)
     corpus = to_pkgguard_corpus(result)
-    assert "pypi:ghost-lib" in corpus
-    assert "pypi:other-ghost" not in corpus
+    assert corpus["pypi"] == ["ghost-lib"]
+    assert "other-ghost" not in corpus["pypi"]
+    assert "pypi:ghost-lib" in corpus["_provenance"]["evidence"]
+
+
+def _as_pkgguard_reads_it(corpus):
+    """pkgguard's own loader, pinned.
+
+    This one expression is the entire contract between the two tools, and both
+    sides fail silently when it is broken: a corpus in the wrong shape loads
+    without error and contributes no names. Copied from
+    pkgguard.service.load_known_hallucinations so CI catches drift without
+    needing pkgguard installed.
+    """
+    return {eco: {n.lower() for n in names} for eco, names in corpus.items()}
+
+
+def test_corpus_is_in_the_format_pkgguard_actually_reads(monkeypatch, tmp_path):
+    provider = ScriptedProvider(
+        ["```bash\npip install ghost-lib\n```"] * 3, tmp_path)
+    _patch_verify(monkeypatch, {"ghost-lib": Verdict("ghost-lib", "pypi", NOT_FOUND)})
+    result = run(provider, _prompts(), samples=3, use_pkgguard=False)
+
+    loaded = _as_pkgguard_reads_it(to_pkgguard_corpus(result))
+
+    assert "ghost-lib" in loaded["pypi"], (
+        "pkgguard would load this corpus and find no names in it"
+    )
+
+
+def test_corpus_survives_a_json_round_trip(monkeypatch, tmp_path):
+    provider = ScriptedProvider(["```bash\npip install ghost-lib\n```"] * 3, tmp_path)
+    _patch_verify(monkeypatch, {"ghost-lib": Verdict("ghost-lib", "pypi", NOT_FOUND)})
+    result = run(provider, _prompts(), samples=3, use_pkgguard=False)
+
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(to_pkgguard_corpus(result), indent=2), encoding="utf-8")
+    reloaded = json.loads(path.read_text(encoding="utf-8"))
+
+    assert _as_pkgguard_reads_it(reloaded)["pypi"] == {"ghost-lib"}
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["util"]).find_spec("pkgguard") is None,
+    reason="pkgguard is an optional dependency",
+)
+def test_corpus_loads_in_a_real_pkgguard(monkeypatch, tmp_path):
+    from pkgguard.service import load_known_hallucinations
+
+    provider = ScriptedProvider(["```bash\npip install ghost-lib\n```"] * 3, tmp_path)
+    _patch_verify(monkeypatch, {"ghost-lib": Verdict("ghost-lib", "pypi", NOT_FOUND)})
+    result = run(provider, _prompts(), samples=3, use_pkgguard=False)
+
+    data_dir = tmp_path / "pkgguard-data"
+    data_dir.mkdir()
+    (data_dir / "known_hallucinations.json").write_text(
+        json.dumps(to_pkgguard_corpus(result)), encoding="utf-8"
+    )
+    monkeypatch.setenv("PKGGUARD_DATA_DIR", str(data_dir))
+    monkeypatch.setattr("pkgguard.service.DATA_DIR", data_dir)
+    load_known_hallucinations.cache_clear()
+    try:
+        assert "ghost-lib" in load_known_hallucinations().get("pypi", set())
+    finally:
+        load_known_hallucinations.cache_clear()
+
+
+# --------------------------------------------------------------------------
+# corpus accumulation
+# --------------------------------------------------------------------------
+
+def _corpus(names_by_eco, source="slopbench a/b", when="2026-09-01"):
+    return {
+        "_provenance": {"note": "n", "sources": [source], "last_updated": when,
+                        "evidence": {f"{eco}:{n.lower()}": {"name": n, "measured": when}
+                                     for eco, ns in names_by_eco.items() for n in ns}},
+        **{eco: list(ns) for eco, ns in names_by_eco.items()},
+    }
+
+
+def test_merge_never_drops_a_name_an_earlier_run_found():
+    merged = merge_pkgguard_corpus(
+        _corpus({"npm": ["react-codeshift"], "pypi": []}),
+        _corpus({"npm": ["vue-codeshift"], "pypi": []}, source="slopbench c/d",
+                when="2026-09-08"),
+    )
+    assert merged["npm"] == ["react-codeshift", "vue-codeshift"]
+    assert merged["_provenance"]["last_updated"] == "2026-09-08"
+    assert len(merged["_provenance"]["sources"]) == 2
+
+
+def test_merging_the_same_run_twice_changes_nothing():
+    incoming = _corpus({"npm": ["react-codeshift"]})
+    once = merge_pkgguard_corpus(_corpus({"npm": []}), incoming)
+    twice = merge_pkgguard_corpus(once, incoming)
+    assert once == twice
+
+
+def test_merge_keeps_the_date_a_name_was_first_seen():
+    first = _corpus({"npm": ["react-codeshift"]}, when="2026-01-04")
+    later = _corpus({"npm": ["react-codeshift"]}, source="slopbench c/d",
+                    when="2026-09-08")
+    merged = merge_pkgguard_corpus(first, later)
+    entry = merged["_provenance"]["evidence"]["npm:react-codeshift"]
+    assert entry["first_seen"] == "2026-01-04"
+    assert entry["measured"] == "2026-09-08"
+
+
+def test_merge_refuses_a_file_that_is_not_a_corpus():
+    # The shape this tool used to emit: keyed by name, holding evidence objects.
+    not_a_corpus = {"npm:react-codeshift": {"name": "react-codeshift"}}
+    with pytest.raises(CorpusFormatError):
+        merge_pkgguard_corpus(not_a_corpus, _corpus({"npm": []}))
+
+
+def test_merge_accepts_a_corpus_with_no_provenance_block():
+    merged = merge_pkgguard_corpus({"npm": ["react-codeshift"]}, _corpus({"npm": ["x"]}))
+    assert merged["npm"] == ["react-codeshift", "x"]
+    assert count_corpus_names(merged) == 2
+
+
+def test_a_run_that_measured_nothing_is_not_reported_as_clean(monkeypatch, tmp_path):
+    """A missing API key must not become a clean bill of health.
+
+    Every completion failing leaves zero findings, which reads identically to a
+    model that invented nothing. The CLI has to tell those apart, because the
+    output of this one is a document someone forwards.
+    """
+    from slopbench import cli
+    from slopbench.providers import ProviderError
+
+    class DeadProvider(Provider):
+        name = "dead"
+
+        def __init__(self):
+            super().__init__("test-model", cache_dir=str(tmp_path))
+
+        def complete(self, prompt, temperature, index):
+            raise ProviderError("no key")
+
+    monkeypatch.setattr(cli, "build", lambda provider, model: DeadProvider())
+    report = tmp_path / "out.html"
+    code = cli.main([
+        "run", "--provider", "ollama", "--model", "m", "--samples", "2",
+        "--limit", "1", "--quiet", "--report", str(report),
+    ])
+
+    assert code == 2
+    assert not report.exists(), "a report was written from zero completions"
+
+
+def test_report_states_how_many_samples_failed(monkeypatch, tmp_path):
+    result = _result(monkeypatch, tmp_path)
+    result.errors = ["p1#0: upstream timeout", "p1#1: upstream timeout"]
+
+    assert "Samples that failed" in render_html(result)
+    assert "2" in render_html(result)
+    assert "Samples that failed and were not measured: 2" in render_markdown(result)
 
 
 def test_rates_are_zero_not_divide_by_zero():

@@ -212,24 +212,138 @@ def run(
     )
 
 
-def to_pkgguard_corpus(result: Result, min_repeat: int = TARGETABLE_MIN_SAMPLES) -> dict:
-    """Emit targetable findings in pkgguard's known-hallucination format.
+PKGGUARD_ECOSYSTEMS = ("npm", "pypi", "crates")
 
-    Only names that recurred are emitted. pkgguard's own README warns that a
-    padded corpus produces confident wrong blocks, and a name invented once is
-    not evidence of anything.
+CORPUS_NOTE = (
+    "Names observed recurring across independent samples of the same prompt by "
+    "slopbench (https://github.com/rxslice/slopbench). A name seen once is not "
+    "included: it cannot be predicted, so it cannot be pre-registered, and "
+    "padding the corpus with it produces confident wrong blocks."
+)
+
+
+class CorpusFormatError(ValueError):
+    """An existing corpus file is not in pkgguard's known-hallucination shape."""
+
+
+def to_pkgguard_corpus(result: Result, min_repeat: int = TARGETABLE_MIN_SAMPLES) -> dict:
+    """Emit targetable findings in pkgguard's known-hallucination file format.
+
+    The shape is pkgguard's exactly: a list of names per ecosystem, plus a
+    `_provenance` block that pkgguard reads past. The obvious alternative — a
+    map keyed by name, holding the evidence for each — is what this emitted
+    first, and it produces a file pkgguard loads without complaint and reads as
+    containing no names at all, because it iterates the top level as ecosystems.
+    A corpus that silently contributes nothing is worse than no corpus, so the
+    format is pinned by a test that feeds the output through pkgguard's own
+    loader.
+
+    Only names that recurred are emitted. pkgguard's own documentation warns
+    that a padded corpus produces confident wrong blocks, and a name invented
+    once is not evidence of anything.
     """
-    corpus: Dict[str, dict] = {}
+    names: Dict[str, List[str]] = {eco: [] for eco in PKGGUARD_ECOSYSTEMS}
+    evidence: Dict[str, dict] = {}
+    source = f"slopbench {result.provider}/{result.model}"
+
     for finding in result.findings:
         if finding.max_repeat_in_prompt < min_repeat:
             continue
-        corpus[f"{finding.ecosystem}:{finding.name.lower()}"] = {
+        if finding.ecosystem not in names:
+            continue
+        names[finding.ecosystem].append(finding.name)
+        evidence[f"{finding.ecosystem}:{finding.name.lower()}"] = {
             "name": finding.name,
             "ecosystem": finding.ecosystem,
-            "source": f"slopbench {result.provider}/{result.model}",
+            "source": source,
             "observed": f"{finding.max_repeat_in_prompt}/{result.samples} samples",
             "prompts": finding.prompt_ids,
             "registry_status": finding.status,
             "measured": result.started,
         }
+
+    corpus: Dict[str, object] = {
+        "_provenance": {
+            "note": CORPUS_NOTE,
+            "sources": [source] if evidence else [],
+            "last_updated": result.started[:10],
+            "evidence": evidence,
+        }
+    }
+    for eco in PKGGUARD_ECOSYSTEMS:
+        corpus[eco] = sorted(set(names[eco]), key=str.lower)
     return corpus
+
+
+def _check_corpus_shape(corpus: dict) -> None:
+    """Reject anything pkgguard would not read as a list of names.
+
+    Worth being strict about: the failure this guards against is silent on both
+    sides. pkgguard loads a malformed corpus without error and simply finds
+    nothing in it.
+    """
+    if not isinstance(corpus, dict):
+        raise CorpusFormatError("corpus must be a JSON object")
+    for key, value in corpus.items():
+        if key.startswith("_"):
+            continue
+        if not isinstance(value, list) or not all(isinstance(n, str) for n in value):
+            raise CorpusFormatError(
+                f"'{key}' must be a list of package names; found "
+                f"{type(value).__name__}. This file is not in pkgguard's "
+                f"known-hallucination format."
+            )
+
+
+def merge_pkgguard_corpus(existing: dict, incoming: dict) -> dict:
+    """Fold a run's findings into a corpus already on disk.
+
+    Merging rather than overwriting is the whole point of running this on a
+    schedule: the corpus is the part that accumulates, and a run that saw
+    nothing must never erase what an earlier one found.
+    """
+    _check_corpus_shape(existing)
+    _check_corpus_shape(incoming)
+
+    merged: Dict[str, object] = {}
+    old_prov = existing.get("_provenance") or {}
+    new_prov = incoming.get("_provenance") or {}
+
+    sources: List[str] = list(old_prov.get("sources") or [])
+    for source in new_prov.get("sources") or []:
+        if source not in sources:
+            sources.append(source)
+
+    evidence = dict(old_prov.get("evidence") or {})
+    for key, entry in (new_prov.get("evidence") or {}).items():
+        previous = evidence.get(key) or {}
+        # Always stamped, including on the first merge, so that merging the same
+        # run twice is a no-op rather than a diff.
+        first_seen = (
+            previous.get("first_seen")
+            or previous.get("measured")
+            or entry.get("measured")
+        )
+        evidence[key] = dict(entry, **({"first_seen": first_seen} if first_seen else {}))
+
+    merged["_provenance"] = {
+        "note": new_prov.get("note") or old_prov.get("note") or CORPUS_NOTE,
+        "sources": sources,
+        "last_updated": max(
+            str(old_prov.get("last_updated") or ""),
+            str(new_prov.get("last_updated") or ""),
+        ),
+        "evidence": evidence,
+    }
+
+    ecosystems = [k for k in (*existing, *incoming) if not k.startswith("_")]
+    for eco in sorted(set(ecosystems)):
+        seen: Dict[str, str] = {}
+        for name in list(existing.get(eco) or []) + list(incoming.get(eco) or []):
+            seen.setdefault(name.lower(), name)
+        merged[eco] = sorted(seen.values(), key=str.lower)
+    return merged
+
+
+def count_corpus_names(corpus: dict) -> int:
+    return sum(len(v) for k, v in corpus.items() if not k.startswith("_"))

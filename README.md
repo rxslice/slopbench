@@ -62,9 +62,18 @@ so the extractor drops anything it cannot stand behind:
 - Import names that differ from distribution names: `import yaml` installs
   `PyYAML`, `import cv2` installs `opencv-python`. Reporting `yaml` as invented
   is the fastest possible way to lose a reader.
+- Prose that happens to follow an install command. Install commands are read
+  only from fenced blocks, inline code spans, and lines that begin with a
+  package manager, and the package list stops at the first token that could not
+  be a name on that registry. Reading them out of running text turned "run pip
+  install pandas to load the data" into four PyPI packages, three of which were
+  English words that 404, recur in every sample, and would have been reported as
+  targetable. Flag arguments are skipped too, so `pip install -r
+  requirements.txt` does not name `requirements.txt` as an invented package.
 
 The counts are a floor, not a ceiling. That is the right direction for a number
-you intend to show someone about their own product.
+you intend to show someone about their own product. A package named only in
+running prose is missed, and that is the trade being made deliberately.
 
 ## Providers
 
@@ -101,9 +110,23 @@ regression gate on your own agent.
 
 `--corpus` writes recurring findings in
 [pkgguard](https://github.com/rxslice/pkgguard-API)'s known-hallucination
-format. Only names that recurred are emitted — pkgguard's own documentation
-warns that a padded corpus produces confident wrong blocks, and a name invented
-once is not evidence of anything.
+format, ready to drop in as `data/known_hallucinations.json`. Only names that
+recurred are emitted — pkgguard's own documentation warns that a padded corpus
+produces confident wrong blocks, and a name invented once is not evidence of
+anything.
+
+If the file already exists it is **merged**, not overwritten: names are unioned,
+the date each was first seen is kept, and every run that contributed is listed
+in `_provenance`. The corpus is the part that accumulates, so a scheduled run
+that happened to see nothing must not erase what an earlier one found. A file
+that is not in pkgguard's format is refused rather than merged into nonsense —
+pkgguard loads a malformed corpus without error and simply finds no names in
+it, which is the kind of failure nobody notices.
+
+```bash
+slopbench run --provider ollama --model qwen2.5-coder:7b   --samples 5 --corpus path/to/pkgguard/data/known_hallucinations.json
+# corpus: 2 new name(s) written to path/to/pkgguard/data/known_hallucinations.json
+```
 
 ## pkgguard is optional
 
