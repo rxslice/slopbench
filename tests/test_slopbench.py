@@ -190,6 +190,22 @@ def test_install_on_its_own_line_is_still_read():
     }
 
 
+def test_a_bare_install_does_not_read_the_next_line():
+    # Seen live from qwen3.8-27b: a bare `npm install` ended one block and the
+    # run command opened the next, so the script's file names were read as
+    # the install's package list, in every sample of the prompt.
+    text = (
+        "```bash\nnpm init -y && npm install\n```\n\nTo run the script:\n\n"
+        "```bash\nnode script.js input.ndjson output.ndjson\n```"
+    )
+    assert names(text) == set()
+    assert names("```bash\npip install\npython app.py data.csv\n```") == set()
+
+
+def test_data_files_are_not_packages():
+    assert names("```bash\nnpm install records.ndjson lodash\n```") == set()
+
+
 def test_flags_do_not_stop_the_package_list():
     assert names("```bash\nnpm install --save-dev jest @types/node\n```") == {
         "jest", "@types/node"

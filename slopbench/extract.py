@@ -100,13 +100,19 @@ _RS_EXTERN = re.compile(r"^\s*extern\s+crate\s+([A-Za-z_][\w]*)", re.M)
 # Cargo.toml dependency lines: `serde = "1.0"` or `serde = { version = ... }`
 _RS_CARGO = re.compile(r"^\s*([A-Za-z][\w-]*)\s*=\s*[\"{]", re.M)
 
+# Whitespace inside a command is `[ \t]`, never `\s`. With `\s`, a bare
+# `npm install` (install what package.json lists, no names) matched across the
+# line break and read the next line as its package list: the code block after
+# `npm init -y && npm install` was `node script.js input.ndjson output.ndjson`,
+# and all three file names came out as invented npm packages. They recur in
+# every sample of that prompt, so they would have been reported as targetable.
 _INSTALL = [
-    (re.compile(r"\bnpm\s+(?:i|install|add)\s+([^\n&|;]+)", re.I), "npm"),
-    (re.compile(r"\b(?:yarn|pnpm|bun)\s+add\s+([^\n&|;]+)", re.I), "npm"),
-    (re.compile(r"\bpip3?\s+install\s+([^\n&|;]+)", re.I), "pypi"),
-    (re.compile(r"\buv\s+(?:pip\s+)?(?:install|add)\s+([^\n&|;]+)", re.I), "pypi"),
-    (re.compile(r"\bpoetry\s+add\s+([^\n&|;]+)", re.I), "pypi"),
-    (re.compile(r"\bcargo\s+add\s+([^\n&|;]+)", re.I), "crates"),
+    (re.compile(r"\bnpm[ \t]+(?:i|install|add)[ \t]+([^\n&|;]+)", re.I), "npm"),
+    (re.compile(r"\b(?:yarn|pnpm|bun)[ \t]+add[ \t]+([^\n&|;]+)", re.I), "npm"),
+    (re.compile(r"\bpip3?[ \t]+install[ \t]+([^\n&|;]+)", re.I), "pypi"),
+    (re.compile(r"\buv[ \t]+(?:pip[ \t]+)?(?:install|add)[ \t]+([^\n&|;]+)", re.I), "pypi"),
+    (re.compile(r"\bpoetry[ \t]+add[ \t]+([^\n&|;]+)", re.I), "pypi"),
+    (re.compile(r"\bcargo[ \t]+add[ \t]+([^\n&|;]+)", re.I), "crates"),
 ]
 
 # Install commands are read only off the *command surface* of a response:
@@ -144,6 +150,9 @@ _FLAGS_TAKING_A_VALUE = {
 _FILE_SUFFIXES = (
     ".txt", ".toml", ".lock", ".cfg", ".ini", ".in", ".yml", ".yaml", ".json",
     ".py", ".whl", ".zip", ".md", ".tar.gz",
+    # Data files a script is pointed at. `.js` is deliberately absent:
+    # chart.js and highlight.js are real packages.
+    ".ndjson", ".jsonl", ".csv", ".tsv", ".sh",
 )
 
 # A token that could not be a package name on the registry it is claimed for is
