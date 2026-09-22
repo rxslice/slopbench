@@ -619,3 +619,52 @@ def test_prompt_ids_are_unique_and_tiered():
     prompts = load_prompts()
     assert len({p["id"] for p in prompts}) == len(prompts)
     assert {p["tier"] for p in prompts} == {"routine", "niche", "emerging"}
+
+
+class _PkgguardResult:
+    def __init__(self, verdict, stats_error=None, exists=True):
+        self.exists = exists
+        self.verdict = verdict
+        self.risk_score = 25
+        self.signals = ["No source repository linked in the registry metadata."]
+        self.facts = {"age_days": 6114, "monthly_downloads": None,
+                      "version_count": 118, "download_stats_error": stats_error}
+
+
+def _stub_pkgguard(monkeypatch, result):
+    import sys
+    import types
+
+    module = types.ModuleType("pkgguard.service")
+    module.verify_many = lambda names, ecosystem: [result]
+    monkeypatch.setitem(sys.modules, "pkgguard", types.ModuleType("pkgguard"))
+    monkeypatch.setitem(sys.modules, "pkgguard.service", module)
+
+
+def test_unmeasured_adoption_is_excluded_not_invented(monkeypatch):
+    # Seen live: pypistats rate-limited mid-run, pkgguard failed closed to
+    # REVIEW, and pandas was about to be reported as an invented package.
+    from slopbench.verify import _with_pkgguard
+
+    _stub_pkgguard(monkeypatch, _PkgguardResult("REVIEW", "HTTP 429"))
+    verdict = _with_pkgguard("pandas", "pypi")
+    assert verdict.status == UNKNOWN
+    assert not verdict.invented
+
+
+def test_a_hard_block_still_counts_when_stats_are_missing(monkeypatch):
+    from slopbench.verify import _with_pkgguard
+
+    _stub_pkgguard(monkeypatch, _PkgguardResult("BLOCK", "HTTP 429"))
+    assert _with_pkgguard("reqeusts", "pypi").status == SUSPICIOUS
+
+
+def test_future_imports_are_not_dependencies():
+    assert names("```python\nfrom __future__ import annotations\nimport requests\n```") == {"requests"}
+
+
+def test_a_closing_backtick_ends_the_command():
+    # Seen live from nemotron-3-super: an install hint inside a string in a
+    # code block, followed by prose.
+    text = '```python\nprint("Install with `pip install weasyprint` and ensure Cairo is present.")\n```'
+    assert names(text) == {"weasyprint"}

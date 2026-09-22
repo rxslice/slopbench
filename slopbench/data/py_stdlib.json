@@ -1,4 +1,7 @@
 [
+"__future__",
+"__main__",
+"_thread",
 "abc",
 "aifc",
 "antigravity",

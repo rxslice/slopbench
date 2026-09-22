@@ -226,6 +226,14 @@ def _with_pkgguard(name: str, ecosystem: str) -> Optional[Verdict]:
     facts = result.facts or {}
     if not result.exists:
         status = NOT_FOUND
+    elif facts.get("download_stats_error") and result.verdict != "BLOCK":
+        # pkgguard fails closed when adoption cannot be measured, which is
+        # right for an install gate and wrong for a measurement. In a run that
+        # hit a rate-limited stats API, pandas, numpy and tqdm all came back
+        # REVIEW (no repository linked, plus stats unavailable) and would have
+        # been reported as invented. Unmeasured is excluded, never invented.
+        return Verdict(name, ecosystem, UNKNOWN,
+                       error=f"adoption unmeasured: {facts['download_stats_error']}")
     elif result.verdict in ("BLOCK", "REVIEW"):
         status = SUSPICIOUS
     else:
