@@ -1,5 +1,7 @@
 # slopbench — measure package hallucination in model output
 
+> **Latest results:** [Where AI coding models invent packages](reports/2026-10-hallux-panel/) (HALLUX panel, Oct 2026): 3.83% of 2,532 package suggestions named packages that do not exist; 0.17% on routine prompts, 5.83% on fast-moving topics.
+
 **Built by [Blvkware](https://blvkware.dev)**
 
 [![CI](https://github.com/rxslice/slopbench/actions/workflows/ci.yml/badge.svg)](https://github.com/rxslice/slopbench/actions/workflows/ci.yml)
