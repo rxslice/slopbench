@@ -32,4 +32,30 @@ know whether models invent names around their project: russ@blvkware.dev.
 - `hallux-panel-2026-10.csv`: suggestions, inventions and rates by tier and by model.
 - `hallux-panel-2026-10-registrability.csv`: invented names by registry and what protected them.
 
+Both files start with `#` comment lines that give the source, dates and licence. Skip them
+when parsing (for example `pandas.read_csv(path, comment="#")`).
+
+### Columns: `hallux-panel-2026-10.csv`
+
+| Column | Meaning |
+|---|---|
+| `dimension` | `tier`, `model` or `all` |
+| `group` | Tier name, model identifier, or `all` |
+| `suggestions` | Package references extracted from usable completions |
+| `invented` | References to packages that do not exist |
+| `rate_pct` | `invented / suggestions`, as a percentage |
+| `ci95_low_pct`, `ci95_high_pct` | 95% Wilson score interval for `rate_pct` |
+
+### Columns: `hallux-panel-2026-10-registrability.csv`
+
+| Column | Meaning |
+|---|---|
+| `registry` | `pypi`, `crates.io`, `npm`, or `all` |
+| `invented_names` | Distinct invented names on that registry |
+| `registrable_by_anyone` | Names a stranger could register on 2 Oct 2026 |
+| `protected_org_scope` | npm names under an organisation scope that already exists |
+| `protected_types_scope` | npm names under `@types` |
+| `protected_npm_punctuation_rule` | npm names blocked because they collide with an existing name under npm's punctuation rule |
+| `unclear` | Names whose status could not be settled |
+
 Data licence: CC BY 4.0. Cite https://blvkware.dev/ai-package-hallucination-data/

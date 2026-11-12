@@ -1,21 +1,24 @@
 # slopbench — measure package hallucination in model output
 
-> **Latest results:** [Where AI coding models invent packages](reports/2026-10-hallux-panel/) (HALLUX panel, Oct 2026): 3.83% of 2,532 package suggestions named packages that do not exist; 0.17% on routine prompts, 5.83% on fast-moving topics.
+> **Latest results:** [Where AI coding models invent packages](https://github.com/rxslice/slopbench/tree/main/reports/2026-10-hallux-panel) (HALLUX panel, 22 Sep to 2 Oct 2026): 3.83% of 2,532 package suggestions from four model families named packages that do not exist; 0.17% on routine prompts, 5.83% on prompts about emerging tools. [Full write-up](https://blvkware.dev/ai-package-hallucination-data/).
 
 **Built by [Blvkware](https://blvkware.dev)**
 
 [![CI](https://github.com/rxslice/slopbench/actions/workflows/ci.yml/badge.svg)](https://github.com/rxslice/slopbench/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/rxslice/slopbench/blob/main/LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 
 slopbench measures how often a language model or coding agent names a software
 dependency that no established package answers to, and — the part that matters —
-how often it names the same one twice.
+how often it names the same one twice. It covers PyPI, npm and crates.io, needs
+nothing beyond the Python standard library, and runs free against a local model.
 
 ```bash
-pip install -e .
+pip install slopbench
 slopbench run --provider ollama --model qwen2.5-coder:7b --samples 5 --report out.html
 ```
+
+To work on slopbench itself, clone this repository and run `pip install -e ".[dev]"`.
 
 ## Why recurrence is the measurement
 
@@ -82,8 +85,8 @@ running prose is missed, and that is the trade being made deliberately.
 | Provider | Configure with | Notes |
 |---|---|---|
 | `ollama` | `OLLAMA_HOST` | Local, free. Start here. |
-| `anthropic` | `ANTHROPIC_API_KEY` | |
-| `openai` | `SLOPBENCH_BASE_URL`, `SLOPBENCH_API_KEY` | Any `/v1/chat/completions` endpoint: OpenAI, Groq, Together, OpenRouter, vLLM, LM Studio. |
+| `anthropic` | `ANTHROPIC_API_KEY` | Current Claude models sample only at their own defaults and refuse a `temperature`. slopbench then drops it for the rest of the run and states in the report how many samples were drawn that way. |
+| `openai` | `SLOPBENCH_BASE_URL`, `SLOPBENCH_API_KEY` (or `OPENAI_API_KEY`) | Any `/v1/chat/completions` endpoint: OpenAI, Groq, Together, OpenRouter, vLLM, LM Studio. The base URL defaults to `https://api.openai.com/v1`. |
 
 Every completion is cached to disk keyed by provider, model, prompt,
 temperature, and sample index. Generation is the only step that costs money;
@@ -102,7 +105,7 @@ slopbench run --provider ollama --model qwen2.5-coder:7b \
   --ecosystem npm --limit 6 --samples 5 --report out.html
 
 # full run with every output
-slopbench run --provider anthropic --model claude-sonnet-4-6 \
+slopbench run --provider anthropic --model claude-sonnet-5-5 \
   --samples 5 --report out.html --markdown out.md \
   --json out.json --corpus corpus.json --subject "Acme Agents"
 ```
@@ -126,7 +129,8 @@ pkgguard loads a malformed corpus without error and simply finds no names in
 it, which is the kind of failure nobody notices.
 
 ```bash
-slopbench run --provider ollama --model qwen2.5-coder:7b   --samples 5 --corpus path/to/pkgguard/data/known_hallucinations.json
+slopbench run --provider ollama --model qwen2.5-coder:7b --samples 5 \
+  --corpus path/to/pkgguard/data/known_hallucinations.json
 # corpus: 2 new name(s) written to path/to/pkgguard/data/known_hallucinations.json
 ```
 
@@ -139,17 +143,22 @@ classifier. The fallback is weaker and says so: it will call some genuine
 squats established that pkgguard catches.
 
 ```bash
-pip install -e ".[pkgguard]"
+pip install "slopbench[pkgguard]"
 ```
+
+The extra installs pkgguard's published distribution,
+[`blvkware-pkgguard`](https://pypi.org/project/blvkware-pkgguard/), which
+provides the `pkgguard` module. Install it under that name. The bare name
+`pkgguard` is not registered on PyPI.
 
 ## The prompt corpus
 
-30 prompts across PyPI, npm, and crates.io, in three tiers:
+30 prompts (12 PyPI, 11 npm, 7 crates.io), in three tiers:
 
-- **routine** — well-covered tasks. This is the control. Invention here means
+- **routine** (8 prompts) — well-covered tasks. This is the control. Invention here means
   the problem is not confined to obscure corners.
-- **niche** — specific integrations with real but thinner public coverage.
-- **emerging** — areas where training data is thinnest, which is where invention
+- **niche** (12) — specific integrations with real but thinner public coverage.
+- **emerging** (10) — areas where training data is thinnest, which is where invention
   concentrates.
 
 No prompt names a package. A prompt that names a library measures
@@ -170,6 +179,42 @@ The corpus is the part worth customizing.
 - Finding zero targetable names is a real result and the report says so plainly
   rather than manufacturing a concern.
 
+## FAQ
+
+**What is slopsquatting?**
+Registering a package name that AI models invent, so that code or an agent which
+installs the invented name gets the attacker's package. It works only when the
+invented name is predictable, which is why slopbench measures recurrence.
+
+**How often do AI coding models invent packages?**
+In the [October 2026 HALLUX panel](https://github.com/rxslice/slopbench/tree/main/reports/2026-10-hallux-panel), 3.83% of 2,532
+package suggestions from four model families named packages that did not exist
+(95% interval 3.15% to 4.65%). The rate was 0.17% on routine prompts and 5.83% on
+prompts about emerging tools. The four families were statistically
+indistinguishable.
+
+**What makes an invented name "targetable"?**
+It appeared in at least two independent samples of the same prompt. A name
+invented once cannot be predicted, so nobody can register it in advance.
+
+**Can I test my own agent or prompts?**
+Yes. Point `--prompts` at a JSON file in the same shape as
+[`slopbench/data/prompts.json`](https://github.com/rxslice/slopbench/blob/main/slopbench/data/prompts.json), and use the
+`openai` provider for any OpenAI-compatible endpoint. The CLI exits `1` when it
+finds a targetable name, so it can gate CI.
+
+**Does it cost anything?**
+Only the model calls. Ollama runs locally for free, and every completion is
+cached, so re-scoring a run costs nothing.
+
+## Citing
+
+If you use slopbench or the panel data, cite it with
+[`CITATION.cff`](https://github.com/rxslice/slopbench/blob/main/CITATION.cff) (GitHub's "Cite this repository" button reads
+it). The panel data is CC BY 4.0. Cite
+https://blvkware.dev/ai-package-hallucination-data/.
+
 ## License
 
-Apache 2.0. Built by [Blvkware](https://blvkware.dev).
+Code: Apache 2.0. Panel data in [`reports/`](https://github.com/rxslice/slopbench/tree/main/reports): CC BY 4.0.
+Built by [Blvkware](https://blvkware.dev).

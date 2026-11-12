@@ -184,6 +184,10 @@ def render_html(result: Result, subject: str = "") -> str:
     ]
     if result.unverifiable_distinct:
         conditions.append(("Names registry could not confirm", result.unverifiable_distinct))
+    if result.default_sampling_samples:
+        conditions.append(("Samples at the model's default sampling "
+                           "(endpoint refused the temperature)",
+                           result.default_sampling_samples))
     if result.errors:
         # A run that lost samples measured less than it looks like it did, and
         # the reader is entitled to that before the number rather than after.
@@ -319,6 +323,11 @@ def render_markdown(result: Result, subject: str = "") -> str:
         lines.append(
             f"- Excluded as unverifiable: {result.unverifiable_distinct} "
             f"(registry unreachable; not counted as clean)"
+        )
+    if result.default_sampling_samples:
+        lines.append(
+            f"- Samples drawn at the model's default sampling because the endpoint "
+            f"refused temperature {result.temperature}: {result.default_sampling_samples}"
         )
     if result.errors:
         lines.append(f"- Samples that failed and were not measured: {len(result.errors)}")

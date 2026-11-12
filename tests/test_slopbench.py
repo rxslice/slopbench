@@ -668,3 +668,67 @@ def test_a_closing_backtick_ends_the_command():
     # code block, followed by prose.
     text = '```python\nprint("Install with `pip install weasyprint` and ensure Cairo is present.")\n```'
     assert names(text) == {"weasyprint"}
+
+
+# --------------------------------------------------------------------------
+# Anthropic provider: current models refuse a sampling temperature
+# --------------------------------------------------------------------------
+
+def _anthropic_reply(text="```bash\npip install requests\n```"):
+    return {"content": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": 10, "output_tokens": 20}}
+
+
+def test_refused_temperature_falls_back_to_default_sampling(monkeypatch, tmp_path):
+    from slopbench import providers
+
+    sent = []
+
+    def fake_post(url, payload, headers):
+        sent.append(payload)
+        if "temperature" in payload:
+            raise providers.ProviderError(
+                'HTTP 400: {"error":{"message":"temperature is deprecated for this model."}}')
+        return _anthropic_reply()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(providers, "_post", fake_post)
+    provider = providers.AnthropicProvider("claude-opus-5-5", cache_dir=str(tmp_path))
+
+    first = provider.complete("task", 0.7, 0)
+    second = provider.complete("task", 0.7, 1)
+
+    assert first.text and not first.temperature_applied
+    assert not second.temperature_applied
+    # One refused request, then no temperature is sent again in this run.
+    assert ["temperature" in p for p in sent] == [True, False, False]
+    # The cache records the truth, so a re-run from cache reports it too.
+    assert not provider.complete("task", 0.7, 0).temperature_applied
+
+
+def test_other_bad_requests_are_not_retried(monkeypatch, tmp_path):
+    from slopbench import providers
+
+    def fake_post(url, payload, headers):
+        raise providers.ProviderError("HTTP 400: model not found")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(providers, "_post", fake_post)
+    provider = providers.AnthropicProvider("claude-nope", cache_dir=str(tmp_path))
+    with pytest.raises(providers.ProviderError):
+        provider.complete("task", 0.7, 0)
+
+
+def test_default_sampling_is_reported(monkeypatch, tmp_path):
+    from slopbench.report import render_html, render_markdown
+
+    class DefaultSampling(ScriptedProvider):
+        def complete(self, prompt, temperature, index):
+            return Completion("```bash\npip install requests\n```", cached=False,
+                              temperature_applied=False)
+
+    _patch_verify(monkeypatch, {})
+    result = run(DefaultSampling([""], tmp_path), _prompts(), samples=2)
+    assert result.default_sampling_samples == 2
+    assert "default sampling" in render_markdown(result)
+    assert "default sampling" in render_html(result)
