@@ -78,6 +78,7 @@ class Result:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_samples: int = 0
+    default_sampling_samples: int = 0
     pkgguard_available: bool = False
     errors: List[str] = field(default_factory=list)
 
@@ -121,7 +122,7 @@ def run(
     occurrences = 0
     empty = 0
     completed = 0
-    in_tokens = out_tokens = cached = 0
+    in_tokens = out_tokens = cached = default_sampling = 0
     errors: List[str] = []
     tier_counts: Dict[str, Dict[str, int]] = {}
 
@@ -138,6 +139,7 @@ def run(
                 continue
             completed += 1
             cached += 1 if completion.cached else 0
+            default_sampling += 0 if completion.temperature_applied else 1
             in_tokens += completion.input_tokens or 0
             out_tokens += completion.output_tokens or 0
             if not completion.text.strip():
@@ -208,6 +210,7 @@ def run(
         unverifiable_distinct=unverifiable,
         findings=findings, by_tier=by_tier,
         input_tokens=in_tokens, output_tokens=out_tokens, cached_samples=cached,
+        default_sampling_samples=default_sampling,
         pkgguard_available=verifier.pkgguard_available, errors=errors,
     )
 

@@ -10,16 +10,32 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 authors = [{name = "Blvkware"}]
-keywords = ["llm", "hallucination", "supply-chain", "slopsquatting", "benchmark", "security"]
+keywords = [
+  "slopsquatting", "package-hallucination", "llm", "llm-security", "ai-coding-agents",
+  "supply-chain-security", "hallucination", "benchmark", "pypi", "npm", "crates-io",
+]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "Topic :: Security",
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
   "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = []
 
 [project.optional-dependencies]
-pkgguard = ["pkgguard"]
+# The distribution is blvkware-pkgguard; it installs the `pkgguard` module.
+# The bare PyPI name "pkgguard" is unregistered: depending on it would let
+# whoever registers it first run code on every machine that installs this extra.
+pkgguard = ["blvkware-pkgguard>=0.1.2"]
 dev = ["pytest>=7"]
 
 [project.scripts]
@@ -27,6 +43,9 @@ slopbench = "slopbench.cli:main"
 
 [project.urls]
 Homepage = "https://blvkware.dev"
+Source = "https://github.com/rxslice/slopbench"
+Issues = "https://github.com/rxslice/slopbench/issues"
+Results = "https://blvkware.dev/ai-package-hallucination-data/"
 
 [tool.setuptools.packages.find]
 include = ["slopbench*"]

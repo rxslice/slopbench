@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use slopbench or its panel data, please cite it as below."
+title: "slopbench: measuring package hallucination and its recurrence in AI model output"
+type: software
+authors:
+  - name: Blvkware
+    website: "https://blvkware.dev"
+repository-code: "https://github.com/rxslice/slopbench"
+url: "https://blvkware.dev/ai-package-hallucination-data/"
+license: Apache-2.0
+version: 0.1.0
+date-released: 2026-09-09
+abstract: >-
+  slopbench measures how often a language model or coding agent names a
+  software dependency that does not exist, or exists without adoption, on
+  PyPI, npm or crates.io, and how often it names the same invented package
+  in independent samples of the same prompt. Only recurring names can be
+  pre-registered by an attacker (slopsquatting), so recurrence is the headline.
+keywords:
+  - slopsquatting
+  - package hallucination
+  - LLM security
+  - software supply chain
+  - AI coding agents
+  - benchmark

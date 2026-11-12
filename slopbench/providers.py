@@ -38,6 +38,10 @@ class Completion:
     cached: bool
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    # False when the endpoint refused the requested temperature and the sample
+    # was drawn at the model's own default sampling instead. Recorded, never
+    # hidden: it changes what the recurrence figure means.
+    temperature_applied: bool = True
 
 
 def _post(url: str, payload: dict, headers: dict) -> dict:
@@ -87,6 +91,7 @@ class Provider:
                     text=data["text"], cached=True,
                     input_tokens=data.get("input_tokens"),
                     output_tokens=data.get("output_tokens"),
+                    temperature_applied=data.get("temperature_applied", True),
                 )
             except (OSError, ValueError, KeyError):
                 pass
@@ -101,6 +106,7 @@ class Provider:
                     "prompt": prompt, "text": result.text,
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
+                    "temperature_applied": result.temperature_applied,
                 }, fh)
             os.replace(temp, path)
         except OSError:
@@ -112,23 +118,54 @@ class Provider:
 
 
 class AnthropicProvider(Provider):
+    """Claude via the Messages API.
+
+    Current Claude models sample only at their own defaults: Opus 4.7 and
+    later, Sonnet 5 and the Fable models reject any `temperature` with a 400,
+    and Sonnet 5.5 and Haiku 5.5 reject non-default values. The first such
+    rejection switches this provider to default sampling for the rest of the
+    run, and every affected sample is marked so the report can say so, rather
+    than the run failing every sample and reporting nothing.
+
+    `max_tokens` is higher than the other providers' because on current models
+    thinking is always on and its tokens count against the same limit; at 2048
+    the visible answer could be cut off before its install command.
+    """
+
     name = "anthropic"
+    MAX_TOKENS = 16000
+
+    def __init__(self, model: str, cache_dir: str = DEFAULT_CACHE) -> None:
+        super().__init__(model, cache_dir)
+        self._send_temperature = True
 
     def _generate(self, prompt: str, temperature: float) -> Completion:
         key = os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise ProviderError("ANTHROPIC_API_KEY is not set.")
-        data = _post(
-            "https://api.anthropic.com/v1/messages",
-            {"model": self.model, "max_tokens": 2048, "temperature": temperature,
-             "messages": [{"role": "user", "content": prompt}]},
-            {"content-type": "application/json", "x-api-key": key,
-             "anthropic-version": "2023-06-01"},
-        )
+        headers = {"content-type": "application/json", "x-api-key": key,
+                   "anthropic-version": "2023-06-01"}
+        payload = {"model": self.model, "max_tokens": self.MAX_TOKENS,
+                   "messages": [{"role": "user", "content": prompt}]}
+
+        data = None
+        if self._send_temperature:
+            try:
+                data = _post("https://api.anthropic.com/v1/messages",
+                             {**payload, "temperature": temperature}, headers)
+            except ProviderError as error:
+                message = str(error)
+                if not (message.startswith("HTTP 400") and "temperature" in message):
+                    raise
+                self._send_temperature = False
+        if data is None:
+            data = _post("https://api.anthropic.com/v1/messages", payload, headers)
+
         text = "".join(b.get("text", "") for b in data.get("content", [])
                        if b.get("type") == "text")
         usage = data.get("usage") or {}
-        return Completion(text, False, usage.get("input_tokens"), usage.get("output_tokens"))
+        return Completion(text, False, usage.get("input_tokens"), usage.get("output_tokens"),
+                          temperature_applied=self._send_temperature)
 
 
 class OpenAICompatibleProvider(Provider):

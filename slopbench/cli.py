@@ -149,6 +149,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           f"{result.total_samples} completions.")
     if result.unverifiable_distinct:
         print(f"{result.unverifiable_distinct} name(s) unverifiable and excluded.")
+    if result.default_sampling_samples:
+        print(f"{result.default_sampling_samples} completion(s) drawn at the model's "
+              f"default sampling: the endpoint refused temperature {result.temperature}.")
     for error in result.errors[:5]:
         print(f"error: {error}", file=sys.stderr)
 
