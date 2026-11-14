@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slopbench"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Measure how often a model invents software dependencies, and how often it invents the same one twice."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -46,6 +46,9 @@ Homepage = "https://blvkware.dev"
 Source = "https://github.com/rxslice/slopbench"
 Issues = "https://github.com/rxslice/slopbench/issues"
 Results = "https://blvkware.dev/ai-package-hallucination-data/"
+
+[tool.setuptools.dynamic]
+version = {attr = "slopbench.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["slopbench*"]

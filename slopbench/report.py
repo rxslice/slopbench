@@ -113,8 +113,8 @@ def _e(value) -> str:
     return html.escape(str(value))
 
 
-def _pct(value: float) -> str:
-    return f"{value * 100:.1f}%"
+def _pct(value) -> str:
+    return "n/a" if value is None else f"{value * 100:.1f}%"
 
 
 def _verdict_sentence(result: Result) -> str:
@@ -179,6 +179,7 @@ def render_html(result: Result, subject: str = "") -> str:
         ("Temperature", result.temperature),
         ("Completions analysed", result.total_samples),
         ("Package references extracted", result.suggestion_occurrences),
+        ("References the registry could verify", result.verified_occurrences),
         ("Distinct packages named", result.distinct_packages),
         ("Measured", result.started),
     ]
@@ -194,7 +195,7 @@ def render_html(result: Result, subject: str = "") -> str:
         conditions.append(("Samples that failed", len(result.errors)))
 
     tier_rows = "\n".join(
-        f'<tr><td>{_e(tier)}</td><td class="num">{c["occurrences"]}</td>'
+        f'<tr><td>{_e(tier)}</td><td class="num">{c.get("verified", c["occurrences"])}</td>'
         f'<td class="num">{c["invented"]}</td><td class="num">{_pct(c["rate"])}</td></tr>'
         for tier, c in result.by_tier.items()
     )
@@ -210,9 +211,10 @@ def render_html(result: Result, subject: str = "") -> str:
         unverifiable_note = (
             f"<p>{result.unverifiable_distinct} distinct "
             f"{'name' if result.unverifiable_distinct == 1 else 'names'} could not be "
-            f"confirmed against the registry during this run and "
+            f"confirmed against the registry during this run "
+            f"({result.unverifiable_occurrences} of {result.suggestion_occurrences} references) and "
             f"{'is' if result.unverifiable_distinct == 1 else 'are'} excluded from every "
-            f"count above rather than assumed clean.</p>"
+            f"count and rate above, numerator and denominator, rather than assumed clean.</p>"
         )
 
     return f"""<!doctype html>
@@ -261,7 +263,7 @@ def render_html(result: Result, subject: str = "") -> str:
 tasks are the control: invention there means the failure is not confined to
 obscure corners of the ecosystem.</p>
 <table>
-  <thead><tr><th>Task type</th><th class="num">References</th>
+  <thead><tr><th>Task type</th><th class="num">Verified references</th>
   <th class="num">Invented</th><th class="num">Rate</th></tr></thead>
   <tbody>{tier_rows}</tbody>
 </table>
@@ -316,7 +318,8 @@ def render_markdown(result: Result, subject: str = "") -> str:
         "",
         f"- Model: `{result.provider}/{result.model}`",
         f"- Prompts: {result.prompts_run}, sampled {result.samples}x at temperature {result.temperature}",
-        f"- Package references extracted: {result.suggestion_occurrences}",
+        f"- Package references extracted: {result.suggestion_occurrences} "
+        f"({result.verified_occurrences} verified by the registry)",
         f"- Measured: {result.started}",
     ]
     if result.unverifiable_distinct:

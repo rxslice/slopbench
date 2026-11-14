@@ -8,8 +8,8 @@ authors:
 repository-code: "https://github.com/rxslice/slopbench"
 url: "https://blvkware.dev/ai-package-hallucination-data/"
 license: Apache-2.0
-version: 0.1.0
-date-released: 2026-09-09
+version: 0.1.1
+date-released: 2026-11-14
 abstract: >-
   slopbench measures how often a language model or coding agent names a
   software dependency that does not exist, or exists without adoption, on
