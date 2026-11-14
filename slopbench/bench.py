@@ -77,16 +77,28 @@ class Result:
     by_tier: Dict[str, dict] = field(default_factory=dict)
     input_tokens: int = 0
     output_tokens: int = 0
+    unverifiable_occurrences: int = 0
     cached_samples: int = 0
     default_sampling_samples: int = 0
     pkgguard_available: bool = False
     errors: List[str] = field(default_factory=list)
 
     @property
+    def verified_occurrences(self) -> int:
+        """References whose name the registry could confirm either way."""
+        return self.suggestion_occurrences - self.unverifiable_occurrences
+
+    @property
     def occurrence_rate(self) -> float:
-        if not self.suggestion_occurrences:
+        """Invented references over verified references.
+
+        Unverifiable references are excluded from the denominator as well as
+        the numerator: counting them in the denominator only would understate
+        the rate by however much of the run the registry could not answer.
+        """
+        if not self.verified_occurrences:
             return 0.0
-        return self.invented_occurrences / self.suggestion_occurrences
+        return self.invented_occurrences / self.verified_occurrences
 
     @property
     def targetable_rate(self) -> float:
@@ -97,6 +109,11 @@ class Result:
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["occurrence_rate"] = round(self.occurrence_rate, 4)
+        payload["verified_occurrences"] = self.verified_occurrences
+        payload["verification_coverage"] = (
+            round(self.verified_occurrences / self.suggestion_occurrences, 4)
+            if self.suggestion_occurrences else None
+        )
         payload["targetable_rate"] = round(self.targetable_rate, 4)
         for finding, raw in zip(self.findings, payload["findings"]):
             raw["targetable"] = finding.targetable
@@ -129,7 +146,7 @@ def run(
     for prompt in prompts:
         pid = prompt["id"]
         tier = prompt.get("tier", "unspecified")
-        tier_counts.setdefault(tier, {"occurrences": 0, "invented": 0})
+        tier_counts.setdefault(tier, {"occurrences": 0, "invented": 0, "unverifiable": 0})
         for index in range(samples):
             note(f"{pid} sample {index + 1}/{samples}")
             try:
@@ -158,6 +175,10 @@ def run(
     findings: List[Finding] = []
     invented_occurrences = 0
     unverifiable = 0
+    unverifiable_occurrences = 0
+
+    def tier_of(pid: str) -> str:
+        return next((p.get("tier", "unspecified") for p in prompts if p["id"] == pid), "unspecified")
 
     for key, per_prompt in seen.items():
         ecosystem, _ = key
@@ -165,6 +186,10 @@ def run(
         verdict: Verdict = verifier(name, ecosystem)
         if verdict.status == UNKNOWN:
             unverifiable += 1
+            unverifiable_occurrences += sum(per_prompt.values())
+            for pid, count in per_prompt.items():
+                tier_counts.setdefault(tier_of(pid), {"occurrences": 0, "invented": 0, "unverifiable": 0})
+                tier_counts[tier_of(pid)]["unverifiable"] += count
             continue
         if not verdict.invented:
             continue
@@ -173,7 +198,7 @@ def run(
         invented_occurrences += total_seen
         for pid in per_prompt:
             tier = next((p.get("tier", "unspecified") for p in prompts if p["id"] == pid), "unspecified")
-            tier_counts.setdefault(tier, {"occurrences": 0, "invented": 0})
+            tier_counts.setdefault(tier, {"occurrences": 0, "invented": 0, "unverifiable": 0})
             tier_counts[tier]["invented"] += per_prompt[pid]
 
         findings.append(Finding(
@@ -189,14 +214,16 @@ def run(
 
     findings.sort(key=lambda f: (-f.max_repeat_in_prompt, -f.samples_seen, f.name))
 
-    by_tier = {
-        tier: {
+    by_tier = {}
+    for tier, counts in sorted(tier_counts.items()):
+        verified = counts["occurrences"] - counts["unverifiable"]
+        by_tier[tier] = {
             **counts,
-            "rate": round(counts["invented"] / counts["occurrences"], 4)
-            if counts["occurrences"] else 0.0,
+            "verified": verified,
+            # Over verified references only; None when nothing was verifiable,
+            # which is "not measured", not a measured zero.
+            "rate": round(counts["invented"] / verified, 4) if verified else None,
         }
-        for tier, counts in sorted(tier_counts.items())
-    }
 
     return Result(
         provider=provider.name, model=provider.model, samples=samples,
@@ -208,6 +235,7 @@ def run(
         invented_occurrences=invented_occurrences, invented_distinct=len(findings),
         targetable_distinct=sum(1 for f in findings if f.targetable),
         unverifiable_distinct=unverifiable,
+        unverifiable_occurrences=unverifiable_occurrences,
         findings=findings, by_tier=by_tier,
         input_tokens=in_tokens, output_tokens=out_tokens, cached_samples=cached,
         default_sampling_samples=default_sampling,

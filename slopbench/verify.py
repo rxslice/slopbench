@@ -224,6 +224,12 @@ def _with_pkgguard(name: str, ecosystem: str) -> Optional[Verdict]:
         return Verdict(name, ecosystem, UNKNOWN, error=str(error))
 
     facts = result.facts or {}
+    if not result.exists and result.verdict != "BLOCK":
+        # pkgguard reports a registry it could not reach as exists=False with
+        # REVIEW, not BLOCK. Only a confirmed absence is a BLOCK; reading
+        # exists=False alone turned outages into invented packages.
+        return Verdict(name, ecosystem, UNKNOWN,
+                       error="registry unreachable: " + "; ".join(result.signals or []))
     if not result.exists:
         status = NOT_FOUND
     elif facts.get("download_stats_error") and result.verdict != "BLOCK":

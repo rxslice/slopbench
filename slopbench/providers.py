@@ -9,8 +9,12 @@ constantly. Separating them means a scoring change costs nothing to re-run, and
 a published result stays reproducible from the cache after the model behind the
 endpoint has moved on.
 
-The cache key covers provider, model, prompt, temperature, and sample index.
-Changing any of them is a different measurement and gets a different key.
+The cache key covers provider, model, prompt, temperature, sample index, and
+the endpoint that answered. Changing any of them is a different measurement
+and gets a different key. Endpoints are identified by URL only, never by
+credential. A provider's default endpoint adds nothing to the key, so caches
+written before the endpoint was part of it stay valid for default setups;
+any other endpoint keys separately.
 """
 from __future__ import annotations
 
@@ -65,6 +69,18 @@ def _post(url: str, payload: dict, headers: dict) -> dict:
     raise ProviderError(str(last))
 
 
+def _normalize_endpoint(url: str) -> str:
+    """Scheme, lowercased host and path, without trailing slash, query or userinfo."""
+    import urllib.parse
+
+    if not url:
+        return ""
+    parts = urllib.parse.urlsplit(url.strip())
+    host = (parts.hostname or "").lower()
+    netloc = host + (f":{parts.port}" if parts.port else "")
+    return urllib.parse.urlunsplit((parts.scheme.lower(), netloc, parts.path.rstrip("/"), "", ""))
+
+
 class Provider:
     """Base adapter. Subclasses implement `_generate`."""
 
@@ -75,10 +91,19 @@ class Provider:
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
 
+    #: The endpoint this provider talks to when nothing overrides it.
+    default_endpoint = ""
+
+    def endpoint(self) -> str:
+        """The normalized URL this provider is configured to call. Never a secret."""
+        return self.default_endpoint
+
     def _cache_path(self, prompt: str, temperature: float, index: int) -> str:
-        digest = hashlib.sha256(
-            f"{self.name}|{self.model}|{temperature}|{index}|{prompt}".encode("utf-8")
-        ).hexdigest()
+        identity = f"{self.name}|{self.model}|{temperature}|{index}|{prompt}"
+        endpoint = _normalize_endpoint(self.endpoint())
+        if endpoint and endpoint != _normalize_endpoint(self.default_endpoint):
+            identity = f"v2|endpoint={endpoint}|" + identity
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         return os.path.join(self.cache_dir, f"{digest}.json")
 
     def complete(self, prompt: str, temperature: float, index: int) -> Completion:
@@ -104,6 +129,7 @@ class Provider:
                     "provider": self.name, "model": self.model,
                     "temperature": temperature, "index": index,
                     "prompt": prompt, "text": result.text,
+                    "endpoint": _normalize_endpoint(self.endpoint()),
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
                     "temperature_applied": result.temperature_applied,
@@ -133,6 +159,7 @@ class AnthropicProvider(Provider):
     """
 
     name = "anthropic"
+    default_endpoint = "https://api.anthropic.com/v1"
     MAX_TOKENS = 16000
 
     def __init__(self, model: str, cache_dir: str = DEFAULT_CACHE) -> None:
@@ -173,6 +200,10 @@ class OpenAICompatibleProvider(Provider):
     vLLM, LM Studio. Set SLOPBENCH_BASE_URL and SLOPBENCH_API_KEY."""
 
     name = "openai"
+    default_endpoint = "https://api.openai.com/v1"
+
+    def endpoint(self) -> str:
+        return os.environ.get("SLOPBENCH_BASE_URL", self.default_endpoint)
 
     def _generate(self, prompt: str, temperature: float) -> Completion:
         base = os.environ.get("SLOPBENCH_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -195,6 +226,10 @@ class OllamaProvider(Provider):
     """Local models. No key, no spend — the way to get a first run for free."""
 
     name = "ollama"
+    default_endpoint = "http://127.0.0.1:11434"
+
+    def endpoint(self) -> str:
+        return os.environ.get("OLLAMA_HOST", self.default_endpoint)
 
     def _generate(self, prompt: str, temperature: float) -> Completion:
         host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
