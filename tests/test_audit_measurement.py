@@ -17,29 +17,53 @@ from slopbench.report import render_html, render_markdown
 
 # --- SLOP-1: a registry outage is never an invented package ---------------
 
-def _pkgguard_verdict(facts):
-    pkgguard = pytest.importorskip("pkgguard")  # noqa: F841
-    from pkgguard.conflation import ConflationDetector
-    from pkgguard.scoring import assess
-    result = assess(facts, ConflationDetector([]), [])
-    with patch("pkgguard.service.verify_many", return_value=[result]):
-        return result, verify.verify(facts.name, facts.ecosystem, True)
+class _PkgguardResult:
+    """Shaped like pkgguard's Assessment, so the adapter is tested without pkgguard."""
+
+    def __init__(self, verdict, exists, signals=(), facts=None):
+        self.verdict, self.exists, self.signals, self.facts = verdict, exists, list(signals), facts
+        self.risk_score = 50 if verdict == "REVIEW" else 90
+
+
+def _stub_pkgguard(monkeypatch, result):
+    import sys
+    import types
+
+    service = types.ModuleType("pkgguard.service")
+    service.verify_many = lambda names, ecosystem: [result]
+    monkeypatch.setitem(sys.modules, "pkgguard", types.ModuleType("pkgguard"))
+    monkeypatch.setitem(sys.modules, "pkgguard.service", service)
 
 
 @pytest.mark.parametrize("error", ["simulated timeout", "HTTP 429", "HTTP 503", "malformed JSON"])
-def test_registry_failure_is_unknown_not_invented(error):
-    from pkgguard.registries import PackageFacts
-    result, verdict = _pkgguard_verdict(PackageFacts("example", "npm", False, fetch_error=error))
-    assert result.verdict == "REVIEW" and result.exists is False  # what pkgguard reports
+def test_registry_failure_is_unknown_not_invented(monkeypatch, error):
+    # What pkgguard returns when it cannot reach the registry.
+    _stub_pkgguard(monkeypatch, _PkgguardResult(
+        "REVIEW", False, [f"Could not reach the npm registry: {error}"]))
+    verdict = verify._with_pkgguard("example", "npm")
     assert verdict.status == verify.UNKNOWN
     assert verdict.invented is False
 
 
-def test_confirmed_absence_still_counts_as_invented():
-    from pkgguard.registries import PackageFacts
-    result, verdict = _pkgguard_verdict(PackageFacts("made-up-thing", "npm", False))
-    assert result.verdict == "BLOCK"
+def test_confirmed_absence_still_counts_as_invented(monkeypatch):
+    _stub_pkgguard(monkeypatch, _PkgguardResult("BLOCK", False, ["No package named 'x' exists"]))
+    verdict = verify._with_pkgguard("made-up-thing", "npm")
     assert verdict.status == verify.NOT_FOUND and verdict.invented
+
+
+def test_against_real_pkgguard_when_installed():
+    pytest.importorskip("pkgguard.scoring")
+    from pkgguard.conflation import ConflationDetector
+    from pkgguard.registries import PackageFacts
+    from pkgguard.scoring import assess
+
+    for facts, expected in [
+        (PackageFacts("example", "npm", False, fetch_error="simulated timeout"), verify.UNKNOWN),
+        (PackageFacts("made-up-thing", "npm", False), verify.NOT_FOUND),
+    ]:
+        result = assess(facts, ConflationDetector([]), [])
+        with patch("pkgguard.service.verify_many", return_value=[result]):
+            assert verify.verify(facts.name, facts.ecosystem, True).status == expected
 
 
 # --- SLOP-2: unverifiable references are out of the denominator -----------
